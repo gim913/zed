@@ -291,6 +291,7 @@ enum WindowsShellType {
     Powershell,
     Cmd,
     Other,
+    None,
 }
 
 /// ShellBuilder is used to turn a user-requested task into a
@@ -359,29 +360,37 @@ impl ShellBuilder {
             WindowsShellType::Other => {
                 format!("{} -i -c '{}'", self.program, command_label)
             }
+            WindowsShellType::None => String::from(command_label),
         }
     }
 
     /// Returns the program and arguments to run this task in a shell.
     pub fn build(mut self, task_command: String, task_args: &Vec<String>) -> (String, Vec<String>) {
-        let combined_command = task_args
-            .into_iter()
-            .fold(task_command, |mut command, arg| {
-                command.push(' ');
-                command.push_str(&self.to_windows_shell_variable(arg.to_string()));
-                command
-            });
+        let shell_type = self.windows_shell_type();
+        if matches!(shell_type, WindowsShellType::None) {
+            (task_command, task_args.clone())
+        } else {
+            let combined_command = task_args
+                .into_iter()
+                .fold(task_command, |mut command, arg| {
+                    command.push(' ');
+                    command.push_str(&self.to_windows_shell_variable(arg.to_string()));
+                    command
+                });
 
-        match self.windows_shell_type() {
-            WindowsShellType::Powershell => self.args.extend(["-C".to_owned(), combined_command]),
-            WindowsShellType::Cmd => self.args.extend(["/C".to_owned(), combined_command]),
-            WindowsShellType::Other => {
-                self.args
-                    .extend(["-i".to_owned(), "-c".to_owned(), combined_command])
+            match self.windows_shell_type() {
+                WindowsShellType::Powershell => {
+                    self.args.extend(["-C".to_owned(), combined_command])
+                }
+                WindowsShellType::Cmd => self.args.extend(["/C".to_owned(), combined_command]),
+                WindowsShellType::Other => {
+                    self.args
+                        .extend(["-i".to_owned(), "-c".to_owned(), combined_command])
+                }
+                WindowsShellType::None => {}
             }
+            (self.program, self.args)
         }
-
-        (self.program, self.args)
     }
     fn windows_shell_type(&self) -> WindowsShellType {
         if self.program == "powershell"
@@ -392,6 +401,8 @@ impl ShellBuilder {
             WindowsShellType::Powershell
         } else if self.program == "cmd" || self.program.ends_with("cmd.exe") {
             WindowsShellType::Cmd
+        } else if self.program == "none" {
+            WindowsShellType::None
         } else {
             // Someother shell detected, the user might install and use a
             // unix-like shell.
@@ -409,7 +420,7 @@ impl ShellBuilder {
         match self.windows_shell_type() {
             WindowsShellType::Powershell => Self::to_powershell_variable(input),
             WindowsShellType::Cmd => Self::to_cmd_variable(input),
-            WindowsShellType::Other => input,
+            WindowsShellType::Other | WindowsShellType::None => input,
         }
     }
 
